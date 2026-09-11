@@ -215,48 +215,6 @@ export default function Episodes() {
 
         {podcast && (
           <>
-            {/* Hosted feed status */}
-            <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }}>
-              <Card>
-                <CardHeader>
-                  <CardTitle className="flex items-center gap-2">
-                    <Globe className="h-5 w-5 text-primary" />
-                    Hosted RSS Feed
-                  </CardTitle>
-                  <CardDescription>
-                    {hostedFeed
-                      ? "Submit this URL to Spotify, Apple Podcasts, and other directories."
-                      : "Generate your Podlogix-hosted feed to distribute this show."}
-                  </CardDescription>
-                </CardHeader>
-                <CardContent className="space-y-3">
-                  {hostedFeed ? (
-                    <div className="flex items-center gap-2">
-                      <code className="flex-1 text-xs bg-muted rounded-md px-3 py-2 break-all" data-testid="text-feed-url">
-                        {hostedFeed.feedUrl}
-                      </code>
-                      <Button variant="outline" size="sm" onClick={copyFeedUrl} data-testid="button-copy-feed">
-                        <Copy className="h-4 w-4" />
-                      </Button>
-                    </div>
-                  ) : (
-                    <Button
-                      onClick={() => generateFeedMutation.mutate()}
-                      disabled={generateFeedMutation.isPending}
-                      data-testid="button-generate-feed"
-                    >
-                      {generateFeedMutation.isPending ? (
-                        <Loader2 className="h-4 w-4 mr-2 animate-spin" />
-                      ) : (
-                        <Rss className="h-4 w-4 mr-2" />
-                      )}
-                      Generate Hosted Feed
-                    </Button>
-                  )}
-                </CardContent>
-              </Card>
-            </motion.div>
-
             {/* New episode */}
             <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.05 }}>
               <Card>

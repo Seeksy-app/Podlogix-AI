@@ -5,9 +5,11 @@ import {
   Mic, CheckCircle2, ArrowRight, Share2, UserPlus,
   PlusCircle, Rss, DollarSign, Headphones, BarChart2,
   Clock, AlertCircle, Radio, ExternalLink,
+  Copy,
 } from "lucide-react";
 import { SiSpotify, SiApplepodcasts, SiAmazon } from "react-icons/si";
 import { Card, CardRow, SectionHeader, TopStat, EmptyState } from "@/components/kit";
+import { useToast } from "@/hooks/use-toast";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Button } from "@/components/ui/button";
 import type { Episode, DistributionChannel, ChannelSubmission, Podcast, RssFeed } from "@shared/schema";
@@ -161,6 +163,12 @@ export default function ShowOverview() {
   const isImportedFromRss = feedsList.some((f) => f.sourceType === "existing");
   const podlogixFeed = feedsList.find((f) => f.sourceType === "podlogix");
   const rssFeedUrl = podlogixFeed?.feedUrl ?? (id ? `${window.location.origin}/feeds/${id}/feed.xml` : "");
+  const { toast } = useToast();
+  const copyFeedUrl = () => {
+    if (!rssFeedUrl) return;
+    void navigator.clipboard.writeText(rssFeedUrl);
+    toast({ title: "Feed URL copied", description: "Paste it into Apple Podcasts Connect, Spotify for Podcasters, or any directory." });
+  };
   const hasActiveFeed = feedsList.length > 0;
 
   const keyChannels = KEY_CHANNEL_IDS.map((cid) => ({
@@ -206,15 +214,32 @@ export default function ShowOverview() {
           <Button size="sm" variant="outline" onClick={handleShare}>
             <Share2 size={13} className="mr-1.5" /> Share
           </Button>
-          {rssFeedUrl ? (
-            <Button size="sm" variant="outline" asChild>
-              <a href={rssFeedUrl} target="_blank" rel="noreferrer">
-                <Rss size={13} className="mr-1.5" /> RSS Feed
-              </a>
-            </Button>
-          ) : null}
         </div>
       </div>
+
+      {/* ── Hosted RSS feed — the show's canonical address; directories are fed from here ── */}
+      {rssFeedUrl && !isHostSynced ? (
+        <section className="mt-6">
+          <Card padding="md" className="flex flex-col gap-3 sm:flex-row sm:items-center">
+            <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-orange-50">
+              <Rss size={17} className="text-primary" strokeWidth={1.75} />
+            </div>
+            <div className="min-w-0 flex-1">
+              <p className="text-sm font-medium text-zinc-950">Hosted RSS feed</p>
+              <p className="mt-0.5 truncate font-mono text-xs text-zinc-600" title={rssFeedUrl}>{rssFeedUrl}</p>
+              <p className="mt-1 text-xs text-zinc-500">Submit this URL to Apple Podcasts, Spotify, and other directories. It updates itself when you publish or edit.</p>
+            </div>
+            <div className="flex shrink-0 items-center gap-2">
+              <Button size="sm" variant="outline" onClick={copyFeedUrl} data-testid="button-copy-feed">
+                <Copy size={13} className="mr-1.5" /> Copy
+              </Button>
+              <Button size="sm" variant="ghost" asChild>
+                <a href={rssFeedUrl} target="_blank" rel="noreferrer" aria-label="Open feed in a new tab"><ExternalLink size={13} /></a>
+              </Button>
+            </div>
+          </Card>
+        </section>
+      ) : null}
 
       {/* ── Stat strip ── */}
       <section className="mt-6">

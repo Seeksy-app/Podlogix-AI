@@ -94,7 +94,6 @@ interface NavItem {
 const WORKSPACE_PRIMARY: NavItem[] = [
   { title: "Dashboard", url: "/today", icon: LayoutDashboard, exact: true },
   { title: "Shows", url: "/shows", icon: Mic, group: "Podcast" },
-  { title: "Episodes", url: "/episodes", icon: List, group: "Podcast" },
   { title: "Listen", url: "/listener", icon: Headphones, group: "Podcast" },
   { title: "Transcript Search", url: "/transcript-search", icon: Search, group: "Podcast" },
   // Guest work follows the user's natural funnel: discover, research, pursue.

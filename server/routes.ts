@@ -1694,7 +1694,11 @@ export async function registerRoutes(
     if (!podcast) return res.status(404).json({ message: 'Podcast not found' });
     if (podcast.userId !== req.session.userId) return res.status(403).json({ message: 'Not your podcast' });
     const feeds = await storage.getRssFeedsByPodcast(req.params.podcastId);
-    res.json(feeds);
+    // The hosted feed's URL is derived from wherever this request came in, never
+    // from the stored row — a dev server writing to the shared database once
+    // persisted a localhost URL that production then displayed.
+    const hostedUrl = `${getPublicBaseUrl(req)}/feeds/${req.params.podcastId}/feed.xml`;
+    res.json(feeds.map((f) => (f.sourceType === 'podlogix' ? { ...f, feedUrl: hostedUrl } : f)));
   });
 
   app.post('/api/podcasts/:podcastId/rss', isAuthenticated, async (req: any, res) => {
