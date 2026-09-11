@@ -5,6 +5,7 @@ import {
   Mic, CheckCircle2, ArrowRight, Share2, UserPlus,
   PlusCircle, Rss, DollarSign, Headphones, BarChart2,
   Clock, AlertCircle, Radio, ExternalLink,
+  Pencil,
 } from "lucide-react";
 import { SiSpotify, SiApplepodcasts, SiAmazon } from "react-icons/si";
 import { Card, CardRow, SectionHeader, TopStat, EmptyState } from "@/components/kit";
@@ -177,19 +178,41 @@ export default function ShowOverview() {
       {/* ── Header ── */}
       <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
         <div className="flex items-start gap-3.5">
-          {showArtwork ? (
-            <img
-              src={showArtwork}
-              alt=""
-              className="h-14 w-14 shrink-0 rounded-xl border border-zinc-200 object-cover"
-            />
-          ) : (
-            <div className="flex h-14 w-14 shrink-0 items-center justify-center rounded-xl border border-zinc-200 bg-zinc-100">
-              <Mic size={20} className="text-zinc-400" strokeWidth={1.75} />
-            </div>
-          )}
+          {/* Artwork + title open Show Settings, where both are editable. Host-synced
+              shows are read-only here (their metadata lives at the host). */}
+          <Link
+            href={`/shows/${id}/settings`}
+            className={`group flex items-center gap-4 rounded-xl ${isHostSynced ? "pointer-events-none" : ""}`}
+            title={isHostSynced ? undefined : "Edit title and artwork"}
+            aria-label="Edit show details"
+          >
+            <span className="relative shrink-0">
+              {showArtwork ? (
+                <img
+                  src={showArtwork}
+                  alt=""
+                  className="h-14 w-14 rounded-xl border border-zinc-200 object-cover"
+                />
+              ) : (
+                <span className="flex h-14 w-14 items-center justify-center rounded-xl border border-zinc-200 bg-zinc-100">
+                  <Mic size={20} className="text-zinc-400" strokeWidth={1.75} />
+                </span>
+              )}
+              {!isHostSynced && (
+                <span className="absolute -bottom-1 -right-1 flex h-6 w-6 items-center justify-center rounded-full border border-zinc-200 bg-white text-zinc-500 opacity-0 shadow-sm transition-opacity group-hover:opacity-100">
+                  <Pencil size={11} />
+                </span>
+              )}
+            </span>
+          </Link>
           <div>
-            <h1 className="text-2xl font-semibold tracking-tight text-zinc-950">{showTitle || "Overview"}</h1>
+            <h1 className="text-2xl font-semibold tracking-tight text-zinc-950">
+              {isHostSynced ? (showTitle || "Overview") : (
+                <Link href={`/shows/${id}/settings`} className="rounded decoration-zinc-300 underline-offset-4 hover:underline" title="Edit title and artwork">
+                  {showTitle || "Overview"}
+                </Link>
+              )}
+            </h1>
             {isImportedFromRss ? (
               <span className="mt-1 inline-flex items-center gap-1 rounded-full border border-zinc-200 bg-zinc-50 px-2 py-0.5 text-[11px] font-medium text-zinc-500">
                 <Rss size={10} /> Imported from RSS
@@ -333,8 +356,10 @@ export default function ShowOverview() {
                 </>
               ) : (
                 <>
-                  <Radio size={13} className="text-zinc-300" />
-                  <span className="text-xs font-medium text-zinc-400">Not configured</span>
+                  {/* The hosted feed is generated on request, so it's live for every show;
+                      "Active" above means it's been registered for directory submission. */}
+                  <CheckCircle2 size={13} className="text-zinc-400" />
+                  <span className="text-xs font-medium text-zinc-500" title={rssFeedUrl}>Ready — not submitted yet</span>
                 </>
               )}
             </div>

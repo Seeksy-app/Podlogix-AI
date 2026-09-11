@@ -1664,6 +1664,11 @@ export async function registerRoutes(
       const userId = req.session.userId!;
       const input = api.podcasts.create.input.parse({ ...req.body, userId });
       const podcast = await storage.createPodcast(input);
+      // The hosted feed is generated on request, so register it right away —
+      // Overview shows it as Active and Directories can submit it immediately.
+      try {
+        await storage.createRssFeed({ podcastId: podcast.id, feedUrl: `${getPublicBaseUrl(req)}/feeds/${podcast.id}/feed.xml`, sourceType: 'podlogix', status: 'active' });
+      } catch (e) { console.error('Could not register hosted feed for new show:', e); }
       res.status(201).json(podcast);
     } catch (err) {
       if (err instanceof z.ZodError) {
@@ -1684,7 +1689,16 @@ export async function registerRoutes(
     const podcast = await storage.getPodcast(req.params.id);
     if (!podcast) return res.status(404).json({ message: 'Podcast not found' });
     if (podcast.userId !== req.session.userId) return res.status(403).json({ message: 'Not your podcast' });
-    const updated = await storage.updatePodcast(req.params.id, req.body);
+    // Only the show's own metadata is editable here — never ownership, ids, or timestamps.
+    const EDITABLE = ['title', 'description', 'artworkUrl', 'author', 'websiteUrl', 'category', 'language', 'isExplicit', 'ownerName', 'ownerEmail', 'copyright'] as const;
+    const updates: Record<string, unknown> = {};
+    for (const key of EDITABLE) if (key in (req.body ?? {})) updates[key] = req.body[key];
+    if ('title' in updates && !String(updates.title ?? '').trim()) return res.status(400).json({ message: 'A show needs a title.' });
+    if ('websiteUrl' in updates && updates.websiteUrl) {
+      try { new URL(String(updates.websiteUrl)); } catch { return res.status(400).json({ message: 'Website must be a full URL (https://…).' }); }
+    }
+    if (Object.keys(updates).length === 0) return res.status(400).json({ message: 'Nothing to update.' });
+    const updated = await storage.updatePodcast(req.params.id, updates);
     res.json(updated);
   });
 
