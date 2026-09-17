@@ -139,11 +139,13 @@ export async function processAutoBriefingsForUser(userId: string, maxEpisodes = 
 
   for (const episode of pendingEpisodes) {
     try {
-      const transcript = await transcribeEpisode(episode.id, userId);
-      
-      if (transcript) {
+      // Long episodes transcribe across several passes; brief only once the
+      // whole transcript exists, and let the next sync resume the rest.
+      const result = await transcribeEpisode(episode.id, userId);
+
+      if (result.status === 'completed') {
         processed++;
-        
+
         await processEpisodeBriefing(episode.id, userId);
         briefingsCreated++;
       }

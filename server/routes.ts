@@ -2750,10 +2750,18 @@ Keep responses concise and conversational (2-4 sentences max unless more detail 
         return res.status(400).json({ message: 'Episode has no audio URL' });
       }
       
-      // Run transcription synchronously — Vercel kills background tasks after response is sent
-      await transcribeEpisode(req.params.id, userId);
-      const updated = await storage.getSubscriptionEpisode(req.params.id);
-      res.json({ message: 'Transcription complete', status: updated?.transcriptStatus || 'complete' });
+      // Transcription runs inside the request — Vercel kills background tasks
+      // once a response is sent. A long episode won't fit in one invocation, so
+      // this returns partial progress and the client calls again to resume.
+      const result = await transcribeEpisode(req.params.id, userId);
+      res.json({
+        status: result.status,
+        partsDone: result.partsDone,
+        partsTotal: result.partsTotal,
+        message: result.status === 'completed'
+          ? 'Transcription complete'
+          : `Transcribed part ${result.partsDone} of ${result.partsTotal}`,
+      });
     } catch (error: any) {
       console.error('Error transcribing episode:', error);
       res.status(500).json({ message: error?.message || 'Failed to transcribe episode' });

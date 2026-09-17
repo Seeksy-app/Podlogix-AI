@@ -133,7 +133,25 @@ export async function processEpisodeBriefing(episodeId: string, userId: string):
   }
 }
 
-export async function transcribeEpisode(episodeId: string, userId: string): Promise<string> {
+export interface TranscribeProgress {
+  status: 'completed' | 'processing';
+  partsDone: number;
+  partsTotal: number;
+  transcript: string;
+}
+
+// One serverless invocation gets 300s. Stop starting new Whisper parts once
+// this much of that budget is spent, so the response always comes back and the
+// caller can resume the remaining parts in a follow-up request.
+const TRANSCRIBE_BUDGET_MS = 190_000;
+
+export async function transcribeEpisode(
+  episodeId: string,
+  userId: string,
+  options: { budgetMs?: number } = {},
+): Promise<TranscribeProgress> {
+  const startedAt = Date.now();
+  const budgetMs = options.budgetMs ?? TRANSCRIBE_BUDGET_MS;
   try {
     // Check OpenAI API key first
     if (!process.env.OPENAI_API_KEY) {
@@ -203,18 +221,49 @@ export async function transcribeEpisode(episodeId: string, userId: string): Prom
       }
     }
 
+    // Resume where the last invocation stopped. The part count depends only on
+    // the file's size, so a part index stays valid across calls; if the feed
+    // swapped the file for a different length, start over rather than splicing
+    // two different recordings together.
+    const previousTotal = episode.transcriptPartsTotal ?? null;
+    const resumable = previousTotal === chunks.length;
+    let partsDone = resumable ? Math.min(episode.transcriptPartsDone ?? 0, chunks.length) : 0;
+    const parts: string[] = partsDone > 0 && episode.transcript ? [episode.transcript] : [];
+    if (!resumable) partsDone = 0;
+
+    await storage.updateSubscriptionEpisode(episodeId, { transcriptPartsTotal: chunks.length });
+
     // Transcribe using OpenAI Whisper — sequentially, so one episode can't
     // fan out into a burst of parallel uploads and trip the rate limit.
-    console.log(`Starting OpenAI Whisper transcription (${chunks.length} part${chunks.length === 1 ? '' : 's'})...`);
-    const parts: string[] = [];
-    for (let i = 0; i < chunks.length; i++) {
-      const audioFile = new File([chunks[i]], `audio-${i + 1}.mp3`, { type: 'audio/mpeg' });
+    console.log(`Whisper transcription: ${chunks.length} part(s), resuming at part ${partsDone + 1}...`);
+    let partsThisCall = 0;
+    while (partsDone < chunks.length) {
+      // Stop only after doing real work in THIS invocation — otherwise a resume
+      // that starts with the budget already spent returns without progressing
+      // and the caller loops forever.
+      if (partsThisCall > 0 && Date.now() - startedAt > budgetMs) {
+        const partial = parts.join('\n');
+        await storage.updateSubscriptionEpisode(episodeId, {
+          transcript: partial,
+          transcriptPartsDone: partsDone,
+          transcriptStatus: 'processing',
+        });
+        console.log(`Budget reached after ${partsDone}/${chunks.length} parts — caller should resume.`);
+        return { status: 'processing', partsDone, partsTotal: chunks.length, transcript: partial };
+      }
+      const audioFile = new File([chunks[partsDone]], `audio-${partsDone + 1}.mp3`, { type: 'audio/mpeg' });
       const text = await openai.audio.transcriptions.create({
         file: audioFile,
         model: 'whisper-1',
         response_format: 'text',
       });
       parts.push(String(text).trim());
+      partsDone += 1;
+      partsThisCall += 1;
+      await storage.updateSubscriptionEpisode(episodeId, {
+        transcript: parts.join('\n'),
+        transcriptPartsDone: partsDone,
+      });
     }
     const transcription = parts.join('\n');
     console.log('Transcription completed successfully');
@@ -223,6 +272,7 @@ export async function transcribeEpisode(episodeId: string, userId: string): Prom
     await storage.updateSubscriptionEpisode(episodeId, {
       transcript: transcription,
       transcriptStatus: 'completed',
+      transcriptPartsDone: chunks.length,
     });
     await chargeCredits(userId, 'transcript', {
       label: episode.title,
@@ -244,7 +294,7 @@ export async function transcribeEpisode(episodeId: string, userId: string): Prom
       emailSent: false,
     });
 
-    return transcription;
+    return { status: 'completed', partsDone: chunks.length, partsTotal: chunks.length, transcript: transcription };
   } catch (error: any) {
     console.error('Error transcribing episode:', error);
     
