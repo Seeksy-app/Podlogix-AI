@@ -484,6 +484,11 @@ export const subscriptionEpisodes = pgTable("subscription_episodes", {
   guid: varchar("guid"), // RSS GUID for deduplication
   transcriptStatus: varchar("transcript_status").default("pending"), // pending, processing, completed, failed
   transcript: text("transcript"),
+  // Whisper caps each request at 25MB, so long episodes transcribe in parts.
+  // One serverless invocation can't always finish them inside its time limit,
+  // so progress is persisted and the next call resumes at the first unfinished part.
+  transcriptPartsDone: integer("transcript_parts_done").default(0),
+  transcriptPartsTotal: integer("transcript_parts_total"),
   briefingStatus: varchar("briefing_status").default("pending"), // pending, processing, completed, failed
   isRead: boolean("is_read").default(false),
   createdAt: timestamp("created_at").defaultNow(),

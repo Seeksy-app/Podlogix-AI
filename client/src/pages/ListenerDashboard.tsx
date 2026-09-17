@@ -54,7 +54,8 @@ import {
   Send,
   Download,
   Copy,
-  MoreHorizontal
+  MoreHorizontal,
+  RotateCw
 } from "lucide-react";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { EpisodeAskSheet } from "@/components/listener/EpisodeAskSheet";
@@ -304,16 +305,33 @@ export default function ListenerDashboard() {
     },
   });
 
+  // Which episode is transcribing right now, and how far in. A full episode
+  // takes minutes and several server round-trips, so the row it was started
+  // from has to show that on its own — a shared "isPending" flag just greys
+  // every button out and reads as a dead click.
+  const [transcribing, setTranscribing] = useState<{ id: string; done: number; total: number } | null>(null);
+
   const transcribeMutation = useMutation({
     mutationFn: async (episodeId: string) => {
-      const res = await apiRequest('POST', `/api/listener/episodes/${episodeId}/transcribe`);
-      return res.json();
+      setTranscribing({ id: episodeId, done: 0, total: 0 });
+      // The server transcribes as many parts as fit in one invocation and
+      // reports progress; keep asking until it says the episode is done.
+      for (let pass = 0; pass < 20; pass++) {
+        const res = await apiRequest('POST', `/api/listener/episodes/${episodeId}/transcribe`);
+        const data = await res.json();
+        setTranscribing({ id: episodeId, done: data.partsDone ?? 0, total: data.partsTotal ?? 0 });
+        queryClient.invalidateQueries({ queryKey: ['/api/listener/episodes'] });
+        if (data.status === 'completed') return data;
+      }
+      throw new Error('Transcription is taking longer than expected — open the episode again to resume it.');
     },
     onSuccess: () => {
+      setTranscribing(null);
       queryClient.invalidateQueries({ queryKey: ['/api/listener/episodes'] });
       toast({ title: "Transcript ready", description: "Open it, download it, or search across all your transcripts." });
     },
     onError: (error: any) => {
+      setTranscribing(null);
       queryClient.invalidateQueries({ queryKey: ['/api/listener/episodes'] });
       // apiRequest surfaces the server message as "500: {json}" — pull the reason out.
       let reason = String(error?.message || "Transcription failed");
@@ -321,6 +339,16 @@ export default function ListenerDashboard() {
       toast({ title: "Couldn't transcribe this episode", description: reason, variant: "destructive" });
     },
   });
+
+  // Tell the person the wait is expected, and roughly how far along it is.
+  const startTranscribe = (episodeId: string, title?: string) => {
+    if (transcribeMutation.isPending) {
+      toast({ title: "One at a time", description: "Another episode is still transcribing — it'll finish in a few minutes." });
+      return;
+    }
+    toast({ title: "Transcribing…", description: `${title ? `"${title}"` : 'This episode'} takes a few minutes. Keep this tab open.` });
+    transcribeMutation.mutate(episodeId);
+  };
 
   const generateBriefingMutation = useMutation({
     mutationFn: async (episodeId: string) => {
@@ -1025,24 +1053,32 @@ export default function ListenerDashboard() {
                                     Generate Briefing
                                   </Button>
                                 )
+                              ) : transcribing?.id === episode.id ? (
+                                <Badge variant="secondary">
+                                  <Loader2 className="h-3 w-3 mr-1 animate-spin" />
+                                  {transcribing.total > 1
+                                    ? `Transcribing part ${Math.min(transcribing.done + 1, transcribing.total)} of ${transcribing.total}…`
+                                    : 'Transcribing…'}
+                                </Badge>
                               ) : episode.transcriptStatus === 'processing' ? (
                                 <div className="flex items-center gap-2">
-                                  <Badge variant="secondary"><Loader2 className="h-3 w-3 mr-1 animate-spin" />Transcribing...</Badge>
-                                  {/* A job can die mid-flight (tab closed, request cut off) and leave the
-                                      episode marked processing forever — give the user a way out. */}
-                                  <Button size="sm" variant="ghost" className="h-7 px-2 text-xs" title="Stuck? Run the transcription again" onClick={() => transcribeMutation.mutate(episode.id)} disabled={transcribeMutation.isPending}>
-                                    Restart
+                                  {/* A job can die mid-flight (tab closed, request cut off). The parts
+                                      already transcribed are saved, so this picks up where it stopped. */}
+                                  <Badge variant="secondary">Partly transcribed</Badge>
+                                  <Button size="sm" variant="outline" className="h-7 px-2 text-xs" onClick={() => startTranscribe(episode.id, episode.title)} data-testid={`button-resume-transcribe-${episode.id}`}>
+                                    <RotateCw className="h-3.5 w-3.5 mr-1" />
+                                    Resume
                                   </Button>
                                 </div>
                               ) : episode.transcriptStatus === 'failed' ? (
                                 <div className="flex items-center gap-2">
                                   <Badge variant="destructive">Transcription Failed</Badge>
-                                  <Button size="sm" variant="outline" onClick={() => transcribeMutation.mutate(episode.id)} disabled={transcribeMutation.isPending} data-testid={`button-retry-transcribe-${episode.id}`}>
+                                  <Button size="sm" variant="outline" onClick={() => startTranscribe(episode.id, episode.title)} data-testid={`button-retry-transcribe-${episode.id}`}>
                                     Retry
                                   </Button>
                                 </div>
                               ) : (
-                                <Button size="sm" variant="outline" onClick={() => transcribeMutation.mutate(episode.id)} disabled={transcribeMutation.isPending || !episode.audioUrl} data-testid={`button-transcribe-${episode.id}`}>
+                                <Button size="sm" variant="outline" onClick={() => startTranscribe(episode.id, episode.title)} disabled={!episode.audioUrl} data-testid={`button-transcribe-${episode.id}`}>
                                   <FileText className="h-4 w-4 mr-1" />
                                   Transcribe
                                 </Button>
@@ -1271,13 +1307,14 @@ export default function ListenerDashboard() {
                                           <Button size="sm" variant="ghost" className="h-7 px-2" onClick={() => setSelectedEpisode(ep)}>
                                             <BookOpen className="h-3.5 w-3.5" />
                                           </Button>
-                                        ) : ep.transcriptStatus !== 'completed' && ep.transcriptStatus !== 'processing' ? (
-                                          <Button size="sm" variant="ghost" className="h-7 px-2" title="Transcribe" onClick={() => transcribeMutation.mutate(ep.id)} disabled={!ep.audioUrl || transcribeMutation.isPending}>
-                                            <FileText className="h-3.5 w-3.5" />
-                                          </Button>
-                                        ) : ep.transcriptStatus === 'processing' ? (
-                                          <Button size="sm" variant="ghost" className="h-7 px-2 text-xs text-muted-foreground" title="Transcribing… click to restart if it's stuck" onClick={() => transcribeMutation.mutate(ep.id)} disabled={transcribeMutation.isPending}>
+                                        ) : transcribing?.id === ep.id ? (
+                                          <span className="flex items-center gap-1.5 px-2 text-xs text-muted-foreground whitespace-nowrap">
                                             <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                                            {transcribing.total > 1 ? `Part ${Math.min(transcribing.done + 1, transcribing.total)}/${transcribing.total}` : 'Transcribing…'}
+                                          </span>
+                                        ) : ep.transcriptStatus !== 'completed' ? (
+                                          <Button size="sm" variant="ghost" className="h-7 px-2" title={ep.transcriptStatus === 'processing' ? "Resume transcribing" : "Transcribe"} onClick={() => startTranscribe(ep.id, ep.title)} disabled={!ep.audioUrl}>
+                                            {ep.transcriptStatus === 'processing' ? <RotateCw className="h-3.5 w-3.5" /> : <FileText className="h-3.5 w-3.5" />}
                                           </Button>
                                         ) : null}
                                       </div>

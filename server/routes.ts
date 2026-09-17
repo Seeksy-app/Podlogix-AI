@@ -1694,7 +1694,11 @@ export async function registerRoutes(
     if (!podcast) return res.status(404).json({ message: 'Podcast not found' });
     if (podcast.userId !== req.session.userId) return res.status(403).json({ message: 'Not your podcast' });
     const feeds = await storage.getRssFeedsByPodcast(req.params.podcastId);
-    res.json(feeds);
+    // The hosted feed's URL is derived from wherever this request came in, never
+    // from the stored row — a dev server writing to the shared database once
+    // persisted a localhost URL that production then displayed.
+    const hostedUrl = `${getPublicBaseUrl(req)}/feeds/${req.params.podcastId}/feed.xml`;
+    res.json(feeds.map((f) => (f.sourceType === 'podlogix' ? { ...f, feedUrl: hostedUrl } : f)));
   });
 
   app.post('/api/podcasts/:podcastId/rss', isAuthenticated, async (req: any, res) => {
@@ -2746,10 +2750,18 @@ Keep responses concise and conversational (2-4 sentences max unless more detail 
         return res.status(400).json({ message: 'Episode has no audio URL' });
       }
       
-      // Run transcription synchronously — Vercel kills background tasks after response is sent
-      await transcribeEpisode(req.params.id, userId);
-      const updated = await storage.getSubscriptionEpisode(req.params.id);
-      res.json({ message: 'Transcription complete', status: updated?.transcriptStatus || 'complete' });
+      // Transcription runs inside the request — Vercel kills background tasks
+      // once a response is sent. A long episode won't fit in one invocation, so
+      // this returns partial progress and the client calls again to resume.
+      const result = await transcribeEpisode(req.params.id, userId);
+      res.json({
+        status: result.status,
+        partsDone: result.partsDone,
+        partsTotal: result.partsTotal,
+        message: result.status === 'completed'
+          ? 'Transcription complete'
+          : `Transcribed part ${result.partsDone} of ${result.partsTotal}`,
+      });
     } catch (error: any) {
       console.error('Error transcribing episode:', error);
       res.status(500).json({ message: error?.message || 'Failed to transcribe episode' });
